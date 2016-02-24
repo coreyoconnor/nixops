@@ -432,8 +432,12 @@ in
 
     deployment.ec2.ami = mkDefault (
       let
-        # FIXME: select hvm-pv AMIs if appropriate.
-        type = if isEc2Hvm then "hvm-ebs" else if cfg.ebsBoot then "pv-ebs" else "pv-s3";
+        # FIXME: select hvm-s3 AMIs if appropriate.
+        type =
+          if isEc2Hvm then
+            if cfg.ebsBoot then "hvm-ebs" else "hvm-s3"
+          else
+            if cfg.ebsBoot then "pv-ebs" else "pv-s3";
         amis' = amis."${nixosVersion}" or amis."15.09"; # default to 15.09 images
       in
         with builtins;
@@ -480,6 +484,16 @@ in
           "m2.4xlarge"  = { cores = 8;  memory = 68557;  allowsEbsOptimized = true;  };
           "m3.xlarge"   = { cores = 4;  memory = 14985;  allowsEbsOptimized = true;  };
           "m3.2xlarge"  = { cores = 8;  memory = 30044;  allowsEbsOptimized = true;  };
+          "m4.10xlarge" = { cores = 40; memory = 163840; allowsEbsOptimized = true;  };
+          "m4.4xlarge"  = { cores = 16; memory = 65536;  allowsEbsOptimized = true;  };
+          "m4.2xlarge"  = { cores = 8;  memory = 32768;  allowsEbsOptimized = true;  };
+          "m4.xlarge"   = { cores = 4;  memory = 16384;  allowsEbsOptimized = true;  };
+          "m4.large"    = { cores = 2;  memory = 8192;   allowsEbsOptimized = true;  };
+          "c4.8xlarge"  = { cores = 36; memory = 61440;  allowsEbsOptimized = true;  };
+          "c4.4xlarge"  = { cores = 16; memory = 30720;  allowsEbsOptimized = true;  };
+          "c4.2xlarge"  = { cores = 8;  memory = 15360;  allowsEbsOptimized = true;  };
+          "c4.xlarge"   = { cores = 4;  memory = 7680;   allowsEbsOptimized = true;  };
+          "c4.large"    = { cores = 2;  memory = 3840;   allowsEbsOptimized = true;  };
           "c1.medium"   = { cores = 2;  memory = 1697;   allowsEbsOptimized = false; };
           "c1.xlarge"   = { cores = 8;  memory = 6953;   allowsEbsOptimized = true;  };
           "cc1.4xlarge" = { cores = 16; memory = 21542;  allowsEbsOptimized = false; };

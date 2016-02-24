@@ -21,7 +21,7 @@ rec {
 
     officialRelease = true; # hack
 
-    buildInputs = [ pkgs.git pkgs.libxslt ];
+    buildInputs = [ pkgs.git pkgs.libxslt pkgs.docbook5_xsl ];
 
     postUnpack = ''
       # Clean up when building from a working tree.
@@ -40,11 +40,11 @@ rec {
               "gce-disk" "gce-image" "gce-forwarding-rule" "gce-http-health-check" "gce-network"
               "gce-static-ip" "gce-target-pool" "gse-bucket" ]}
 
-        make -C doc/manual install docbookxsl=${pkgs.docbook5_xsl}/xml/xsl/docbook \
-            docdir=$out/manual mandir=$TMPDIR/man
+        for i in scripts/nixops setup.py doc/manual/manual.xml; do
+          substituteInPlace $i --subst-var-by version ${version}
+        done
 
-        substituteInPlace scripts/nixops --subst-var-by version ${version}
-        substituteInPlace setup.py --subst-var-by version ${version}
+        make -C doc/manual install docdir=$out/manual mandir=$TMPDIR/man
 
         releaseName=nixops-$VERSION
         mkdir ../$releaseName
