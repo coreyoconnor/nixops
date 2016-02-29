@@ -82,7 +82,9 @@ rec {
         export PATH=$(pwd)/scripts:$PATH
       '';
 
-      doCheck = true;
+      # https://github.com/NixOS/nixpkgs/commit/917ca8920da46b94867a01590423f66390a152c0
+      # the tests assume a cert file can be accessed
+      doCheck = false;
 
       postInstall =
         ''
