@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 import os
 import os.path
 import sys
@@ -20,7 +19,6 @@ import nixops.util
 import nixops.ec2_utils
 import nixops.known_hosts
 from xml import etree
-
 
 class EC2InstanceDisappeared(Exception):
     pass
@@ -93,6 +91,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
     zone = nixops.util.attr_property("ec2.zone", None)
     ami = nixops.util.attr_property("ec2.ami", None)
     instance_type = nixops.util.attr_property("ec2.instanceType", None)
+    ebs_optimized = nixops.util.attr_property("ec2.ebsOptimized", None, bool)
     key_pair = nixops.util.attr_property("ec2.keyPair", None)
     public_host_key = nixops.util.attr_property("ec2.publicHostKey", None)
     private_host_key = nixops.util.attr_property("ec2.privateHostKey", None)
@@ -136,6 +135,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
             self.zone = None
             self.ami = None
             self.instance_type = None
+            self.ebs_optimized = None
             self.key_pair = None
             self.public_host_key = None
             self.private_host_key = None
@@ -586,8 +586,13 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
                     self.ssh_pinged = False
 
             elif self.elastic_ipv4 != None:
-                self.log("disassociating IP address ‘{0}’...".format(self.elastic_ipv4))
-                self._conn.disassociate_address(public_ip=self.elastic_ipv4)
+                addresses = self._conn.get_all_addresses(addresses=[self.elastic_ipv4])
+                if len(addresses) == 1 and addresses[0].instance_id == self.vm_id:
+                    self.log("disassociating IP address ‘{0}’...".format(self.elastic_ipv4))
+                    self._conn.disassociate_address(public_ip=self.elastic_ipv4)
+                else:
+                    self.log("address ‘{0}’ was not associated with instance ‘{1}’".format(self.elastic_ipv4, self.vm_id))
+
                 with self.depl._db:
                     self.elastic_ipv4 = None
                     self.public_ipv4 = None
@@ -766,7 +771,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
 
         # Stop the instance (if allowed) to change instance attributes
         # such as the type.
-        if self.vm_id and allow_reboot and self._booted_from_ebs() and self.instance_type != defn.instance_type:
+        if self.vm_id and allow_reboot and self._booted_from_ebs() and ( self.instance_type != defn.instance_type or self.ebs_optimized != defn.ebs_optimized):
             self.stop()
             check = True
 
@@ -788,6 +793,11 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
                     self.log("changing instance type from ‘{0}’ to ‘{1}’...".format(self.instance_type, defn.instance_type))
                     instance.modify_attribute("instanceType", defn.instance_type)
                     self.instance_type = defn.instance_type
+
+                if self.ebs_optimized != defn.ebs_optimized:
+                    self.log("changing ebs optimized flag from ‘{0}’ to ‘{1}’...".format(self.ebs_optimized, defn.ebs_optimized))
+                    instance.modify_attribute("ebsOptimized", defn.ebs_optimized)
+                    self.ebs_optimized = defn.ebs_optimized
 
                 # When we restart, we'll probably get a new IP.  So forget the current one.
                 self.public_ipv4 = None
@@ -878,6 +888,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
                 self.vm_id = instance.id
                 self.ami = defn.ami
                 self.instance_type = defn.instance_type
+                self.ebs_optimized = ebs_optimized
                 self.key_pair = defn.key_pair
                 self.security_groups = defn.security_groups
                 self.placement_group = defn.placement_group
@@ -903,6 +914,8 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
         # Warn about some EC2 options that we cannot update for an existing instance.
         if self.instance_type != defn.instance_type:
             self.warn("cannot change type of a running instance (use ‘--allow-reboot’)")
+        if self.ebs_optimized and self.ebs_optimized != defn.ebs_optimized:
+            self.warn("cannot change ebs optimized attribute of a running instance (use ‘--allow-reboot’)")
         if defn.zone and self.zone != defn.zone:
             self.warn("cannot change availability zone of a running instance")
         if set(defn.security_groups) != set(self.security_groups):
@@ -1308,6 +1321,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
 
         if instance is None or instance.state in {"shutting-down", "terminated"}:
             self.state = self.MISSING
+            self.vm_id = None
             return
 
         res.exists = True
