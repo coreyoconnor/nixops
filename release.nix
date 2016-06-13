@@ -6,7 +6,7 @@ let
 
   pkgs = import <nixpkgs> { };
 
-  version = "1.3.2" + (if officialRelease then "" else "pre${toString nixopsSrc.revCount}_${nixopsSrc.shortRev}");
+  version = "1.4" + (if officialRelease then "" else "pre${toString nixopsSrc.revCount}_${nixopsSrc.shortRev}");
 
 in
 
@@ -38,7 +38,14 @@ rec {
           cp ${import ./doc/manual/resource.nix { revision = nixopsSrc.rev; module = ./nix + ("/" + fn + ".nix"); }} doc/manual/${fn}-options.xml
         '') [ "ebs-volume" "sqs-queue" "ec2-keypair" "s3-bucket" "iam-role" "ssh-keypair" "ec2-security-group" "elastic-ip"
               "gce-disk" "gce-image" "gce-forwarding-rule" "gce-http-health-check" "gce-network"
-              "gce-static-ip" "gce-target-pool" "gse-bucket" ]}
+              "gce-static-ip" "gce-target-pool" "gse-bucket"
+              "azure-availability-set" "azure-blob-container" "azure-blob" "azure-directory"
+              "azure-dns-record-set" "azure-dns-zone" "azure-express-route-circuit"
+              "azure-file" "azure-gateway-connection" "azure-load-balancer" "azure-local-network-gateway"
+              "azure-network-security-group" "azure-queue" "azure-reserved-ip-address"
+              "azure-resource-group" "azure-share" "azure-storage" "azure-table"
+              "azure-traffic-manager-profile"
+              "azure-virtual-network" "azure-virtual-network-gateway"]}
 
         for i in scripts/nixops setup.py doc/manual/manual.xml; do
           substituteInPlace $i --subst-var-by version ${version}
@@ -73,18 +80,27 @@ rec {
           pythonPackages.boto
           pythonPackages.hetzner
           pythonPackages.libcloud
+          pythonPackages.azure-storage
+          pythonPackages.azure-mgmt-compute
+          pythonPackages.azure-mgmt-network
+          pythonPackages.azure-mgmt-resource
+          pythonPackages.azure-mgmt-storage
+          pythonPackages.adal
           pythonPackages.sqlite3
         ];
 
       # For "nix-build --run-env".
       shellHook = ''
         export PYTHONPATH=$(pwd):$PYTHONPATH
-        export PATH=$(pwd)/scripts:$PATH
+        export PATH=$(pwd)/scripts:${openssh}/bin:$PATH
       '';
 
       # https://github.com/NixOS/nixpkgs/commit/917ca8920da46b94867a01590423f66390a152c0
       # the tests assume a cert file can be accessed
       doCheck = false;
+
+      # Needed by libcloud during tests
+      SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
 
       postInstall =
         ''

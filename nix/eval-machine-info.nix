@@ -96,6 +96,125 @@ rec {
   resources.rdsDbInstances = evalResources ./ec2-rds-dbinstance.nix (zipAttrs resourcesByType.rdsDbInstances or []);
   resources.machines = mapAttrs (n: v: v.config) nodes;
 
+  # Azure resources
+  resources.azureAvailabilitySets = evalAzureResources ./azure-availability-set.nix (zipAttrs resourcesByType.azureAvailabilitySets or []);
+  resources.azureBlobContainers =
+      evalResources ./azure-blob-container.nix
+          (azure_default_containers // (zipAttrs resourcesByType.azureBlobContainers or []));
+  resources.azureBlobs =
+      evalResources ./azure-blob.nix
+          (azure_default_blobs // (zipAttrs resourcesByType.azureBlobs or []));
+  resources.azureDirectories = evalResources ./azure-directory.nix (zipAttrs resourcesByType.azureDirectories or []);
+  resources.azureDNSRecordSets = evalResources ./azure-dns-record-set.nix (zipAttrs resourcesByType.azureDNSRecordSets or []);
+  resources.azureDNSZones = evalAzureResources ./azure-dns-zone.nix (zipAttrs resourcesByType.azureDNSZones or []);
+  resources.azureExpressRouteCircuits = evalAzureResources ./azure-express-route-circuit.nix (zipAttrs resourcesByType.azureExpressRouteCircuits or []);
+  resources.azureFiles = evalResources ./azure-file.nix (zipAttrs resourcesByType.azureFiles or []);
+  resources.azureGatewayConnections = evalAzureResources ./azure-gateway-connection.nix (zipAttrs resourcesByType.azureGatewayConnections or []);
+  resources.azureLoadBalancers = evalAzureResources ./azure-load-balancer.nix (zipAttrs resourcesByType.azureLoadBalancers or []);
+  resources.azureLocalNetworkGateways = evalAzureResources ./azure-local-network-gateway.nix (zipAttrs resourcesByType.azureLocalNetworkGateways or []);
+  resources.azureQueues = evalResources ./azure-queue.nix (zipAttrs resourcesByType.azureQueues or []);
+  resources.azureReservedIPAddresses = evalAzureResources ./azure-reserved-ip-address.nix (zipAttrs resourcesByType.azureReservedIPAddresses or []);
+  resources.azureResourceGroups =
+      evalAzureResourceGroups ./azure-resource-group.nix
+          (azure_default_group // (zipAttrs resourcesByType.azureResourceGroups or []));
+  resources.azureSecurityGroups = evalAzureResources ./azure-network-security-group.nix (zipAttrs resourcesByType.azureSecurityGroups or []);
+  resources.azureShares = evalResources ./azure-share.nix (zipAttrs resourcesByType.azureShares or []);
+  resources.azureStorages =
+      evalAzureResources ./azure-storage.nix
+          (azure_default_storages // (zipAttrs resourcesByType.azureStorages or []));
+  resources.azureTables = evalResources ./azure-table.nix (zipAttrs resourcesByType.azureTables or []);
+  resources.azureTrafficManagerProfiles = evalAzureResources ./azure-traffic-manager-profile.nix (zipAttrs resourcesByType.azureTrafficManagerProfiles or []);
+  resources.azureVirtualNetworkGateways = evalAzureResources ./azure-virtual-network-gateway.nix (zipAttrs resourcesByType.azureVirtualNetworkGateways or []);
+  resources.azureVirtualNetworks =
+      evalAzureResources ./azure-virtual-network.nix
+          (azure_default_networks // (zipAttrs resourcesByType.azureVirtualNetworks or []));
+
+  # check if there are duplicate elements in a sorted list
+  noDups = l:
+    if length l > 1
+    then
+      if (head l) == (head (tail l))
+      then throw "found resources with duplicate names: ${head l}"
+      else noDups (tail l)
+    else true;
+
+  evalAzureResources = module: resources:
+    let
+      resourceGroup = r:
+        if isAttrs r.resourceGroup
+        then r.resourceGroup.name
+        else r.resourceGroup;
+      resourceNames = rs:
+        sort lessThan
+             (mapAttrsToList (n: v: toLower ("${resourceGroup v}/${v.name}")) rs);
+      resources' = evalResources module resources;
+    in assert (noDups (resourceNames resources')); resources';
+
+  evalAzureResourceGroups = module: resources:
+    let
+      resourceNames = rs:
+        sort lessThan
+             (mapAttrsToList (n: v: toLower v.name) rs);
+      resources' = evalResources module resources;
+    in assert (noDups (resourceNames resources')); resources';
+
+
+  azure_deployments = filterAttrs ( n: v: (scrubOptionValue v).config.deployment.targetEnv == "azure") nodes;
+
+  azure_default_group = flip mapAttrs' azure_deployments (name: depl:
+    let azure = (scrubOptionValue depl).config.deployment.azure; in (
+      nameValuePair ("def-group") [ {
+        inherit (azure) subscriptionId authority user servicePrincipal password location;
+      }]
+    )
+  );
+
+  # "West US" -> "westus"
+  normalize_location = l: builtins.replaceStrings [" "] [""] (toLower l);
+
+  azure_default_networks = mapAttrs' (name: depl:
+    let azure = (scrubOptionValue depl).config.deployment.azure; in (
+      nameValuePair ("dn-${normalize_location azure.location}") [({ resources, ...}: {
+        inherit (azure) subscriptionId authority user servicePrincipal password location;
+        resourceGroup = resources.azureResourceGroups.def-group;
+        addressSpace = [ "10.1.0.0/16" ];
+      })]
+    )
+  ) azure_deployments;
+
+  azure_default_storages = mapAttrs' (name: depl:
+    let azure = (scrubOptionValue depl).config.deployment.azure; in (
+      nameValuePair ("def-storage-${normalize_location azure.location}") [({ resources, ...}: {
+        inherit (azure) subscriptionId authority user servicePrincipal password location;
+        resourceGroup = resources.azureResourceGroups.def-group;
+        name = "${builtins.substring 0 12 (builtins.replaceStrings ["-"] [""] uuid)}${normalize_location azure.location}";
+      })]
+    )
+  ) azure_deployments;
+
+  azure_default_containers = mapAttrs' (name: depl:
+    let azure = (scrubOptionValue depl).config.deployment.azure; in (
+      nameValuePair ("${azure.storage._name}-vhds") [({ resources, ...}: {
+        inherit (azure) storage;
+        name = "nixops-${uuid}-vhds";
+      })]
+    )
+  ) azure_deployments;
+
+  azure_default_blobs = mapAttrs' (name: depl:
+    let azure = (scrubOptionValue depl).config.deployment.azure; in (
+      nameValuePair ("${azure.ephemeralDiskContainer._name}-image") [({ resources, ...}: {
+        storage = azure.storage;
+        container = azure.ephemeralDiskContainer;
+        name = "nixops-${uuid}-unstable-image.vhd";
+        blobType = "PageBlob";
+        copyFromBlob = if args ? azure-image-url
+                       then args.azure-image-url
+                       else "https://nixos.blob.core.windows.net/images/nixos-image-16.03.847.8688c17-x86_64-linux.vhd";
+      })]
+    )
+  ) azure_deployments;
+
   # Google Compute resources
   resources.gceDisks = evalResources ./gce-disk.nix (zipAttrs resourcesByType.gceDisks or []);
   resources.gceStaticIPs = evalResources ./gce-static-ip.nix (zipAttrs resourcesByType.gceStaticIPs or []);
@@ -110,26 +229,33 @@ rec {
                       ( n: v: let dc = (scrubOptionValue v).config.deployment; in dc.targetEnv == "gce" );
 
   gce_default_bootstrap_images = flip mapAttrs' gce_deployments (name: depl:
-    let gce = (scrubOptionValue depl).config.deployment.gce; in (
+    let
+      gce = (scrubOptionValue depl).config.deployment.gce; 
+      images = {
+        "14.12" = "gs://nixos-cloud-images/nixos-14.12.471.1f09b77-x86_64-linux.raw.tar.gz";
+        "15.09" = "gs://nixos-cloud-images/nixos-15.09.425.7870f20-x86_64-linux.raw.tar.gz";
+        "16.03" = "gs://nixos-cloud-images/nixos-image-16.03.847.8688c17-x86_64-linux.raw.tar.gz";
+      };
+    in (
       nameValuePair ("bootstrap") [({ pkgs, ...}: {
         inherit (gce) project serviceAccount accessKey;
-        sourceUri =
-          if pkgs.lib.substring 0 5 pkgs.lib.nixpkgsVersion == "14.12" then
-            "gs://nixos-cloud-images/nixos-14.12.471.1f09b77-x86_64-linux.raw.tar.gz"
-          else
-            "gs://nixos-cloud-images/nixos-15.09.425.7870f20-x86_64-linux.raw.tar.gz";
-
+        sourceUri = images."${pkgs.lib.substring 0 5 pkgs.lib.nixpkgsVersion}" or images."16.03";
       })]
     )
   );
 
   # Phase 1: evaluate only the deployment attributes.
-  info = {
+  info =
+    let
+      network' = network;
+      resources' = resources;
+    in rec {
 
     machines =
       flip mapAttrs nodes (n: v': let v = scrubOptionValue v'; in
         { inherit (v.config.deployment) targetEnv targetPort targetHost encryptedLinksTo storeKeysOnMachine alwaysActivate owners keys;
           nixosRelease = v.config.system.nixosRelease or (removeSuffix v.config.system.nixosVersionSuffix v.config.system.nixosVersion);
+          azure = optionalAttrs (v.config.deployment.targetEnv == "azure")  v.config.deployment.azure;
           ec2 = optionalAttrs (v.config.deployment.targetEnv == "ec2") v.config.deployment.ec2;
           gce = optionalAttrs (v.config.deployment.targetEnv == "gce") v.config.deployment.gce;
           hetzner = optionalAttrs (v.config.deployment.targetEnv == "hetzner") v.config.deployment.hetzner;
@@ -144,9 +270,40 @@ rec {
         }
       );
 
-    network = fold (as: bs: as // bs) {} (network.network or []);
+    network = fold (as: bs: as // bs) {} (network'.network or []);
 
-    resources = removeAttrs resources [ "machines" ];
+    resources =
+    let
+      resource_referenced = list: check: recurse:
+          any id (map (value: (check value) ||
+                              ((isAttrs value) && (!(value ? _type) || recurse)
+                                               && (resource_referenced (attrValues value) check false)))
+                      list);
+      azure_machines = mapAttrs (n: v: v.azure)
+                                (filterAttrs ( n: v: v.targetEnv == "azure") machines);
+
+      flatten_resources = resources: flatten ( map attrValues (attrValues resources) );
+
+      resource_used = res_set: resource:
+          resource_referenced
+              ((flatten_resources res_set) ++ (attrValues azure_machines))
+              (value: value == resource )
+              true;
+
+      resources_without_defaults = res_class: defaults: res_set:
+        let
+          missing = filter (res: !(resource_used (removeAttrs res_set [res_class])
+                                                  res_set."${res_class}"."${res}"))
+                           (attrNames defaults);
+        in
+        res_set // { "${res_class}" = ( removeAttrs res_set."${res_class}" missing ); };
+
+    in  resources_without_defaults "azureResourceGroups" azure_default_group
+       (resources_without_defaults "azureStorages" azure_default_storages
+       (resources_without_defaults "azureBlobContainers" azure_default_containers
+       (resources_without_defaults "azureBlobs" azure_default_blobs
+       (resources_without_defaults "azureVirtualNetworks" azure_default_networks
+       (removeAttrs resources' [ "machines" ])))));
 
   };
 

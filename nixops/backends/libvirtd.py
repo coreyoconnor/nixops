@@ -23,8 +23,10 @@ class LibvirtdDefinition(MachineDefinition):
 
         x = xml.find("attrs/attr[@name='libvirtd']/attrs")
         assert x is not None
+        self.vcpu = x.find("attr[@name='vcpu']/int").get("value")
         self.memory_size = x.find("attr[@name='memorySize']/int").get("value")
         self.extra_devices = x.find("attr[@name='extraDevicesXML']/string").get("value")
+        self.extra_domain = x.find("attr[@name='extraDomainXML']/string").get("value")
         self.headless = x.find("attr[@name='headless']/bool").get("value") == 'true'
         self.image_dir = x.find("attr[@name='imageDir']/string").get("value")
         assert self.image_dir is not None
@@ -57,6 +59,7 @@ class LibvirtdState(MachineState):
     domain_xml = nixops.util.attr_property("libvirtd.domainXML", None)
     disk_path = nixops.util.attr_property("libvirtd.diskPath", None)
     extra_disks = nixops.util.attr_property("libvirtd.extraDisks", {}, 'json')
+    vcpu = nixops.util.attr_property("libvirtd.vcpu", None)
 
     @classmethod
     def get_type(cls):
@@ -152,6 +155,10 @@ class LibvirtdState(MachineState):
         return out
 
     def _make_domain_xml(self, defn):
+        qemu_executable = "qemu-system-x86_64"
+        qemu = spawn.find_executable(qemu_executable)
+        assert qemu is not None, "{} executable not found. Please install QEMU first.".format(qemu_executable)
+
         def maybe_mac(n):
             if n == self.primary_net:
                 return '<mac address="' + self.primary_mac + '" />'
@@ -179,7 +186,7 @@ class LibvirtdState(MachineState):
             '<domain type="kvm">',
             '  <name>{0}</name>',
             '  <memory unit="MiB">{1}</memory>',
-            '  <vcpu>1</vcpu>',
+            '  <vcpu>{4}</vcpu>',
             '  <os>',
             '    <type arch="x86_64">hvm</type>',
             '  </os>',
@@ -197,17 +204,16 @@ class LibvirtdState(MachineState):
             '    <input type="mouse" bus="usb"/>',
             defn.extra_devices,
             '  </devices>',
+            defn.extra_domain,
             '</domain>',
         ])
-
-        qemu_kvm = spawn.find_executable("qemu-kvm")
-        assert qemu_kvm is not None, "qemu-kvm executable not found"
 
         return domain_fmt.format(
             self._vm_id(),
             defn.memory_size,
-            qemu_kvm,
+            qemu,
             self._disk_path(defn),
+            defn.vcpu
         )
 
     def _parse_ip(self):
@@ -229,7 +235,7 @@ class LibvirtdState(MachineState):
             return ip_with_subnet.split('/')[0]
 
     def _wait_for_ip(self, prev_time):
-        self.log_start("waiting for IP address...")
+        self.log_start("waiting for IP address to appear in DHCP leases...")
         while True:
             ip = self._parse_ip()
             if ip:
@@ -244,13 +250,14 @@ class LibvirtdState(MachineState):
         return (string.find(ls, self.vm_id) != -1)
 
     def start(self):
-        self.log("starting...")
         assert self.vm_id
         assert self.domain_xml
         assert self.primary_net
         if self._is_running():
+            self.log("connecting...")
             self.private_ipv4 = self._parse_ip()
         else:
+            self.log("starting...")
             dom_file = self.depl.tempdir + "/{0}-domain.xml".format(self.name)
             nixops.util.write_file(dom_file, self.domain_xml)
             self._logged_exec(["virsh", "-c", "qemu:///system", "create", dom_file])

@@ -14,8 +14,9 @@ let
     (builtins.toXML (pkgs.lib.optionAttrSetToDocList systemModule.options)));
 
   optionsDocBook = pkgs.runCommand "options-db.xml" {} ''
-    ${pkgs.libxslt}/bin/xsltproc \
+    ${pkgs.libxslt.bin or pkgs.libxslt}/bin/xsltproc \
       --stringparam revision '${revision}' \
+      --stringparam program 'nixops' \
       -o $out ${<nixpkgs/nixos/doc/manual/options-to-docbook.xsl>} ${optionsXML}
   '';
 

@@ -19,6 +19,7 @@ import nixops.util
 import nixops.ec2_utils
 import nixops.known_hosts
 from xml import etree
+import datetime
 
 class EC2InstanceDisappeared(Exception):
     pass
@@ -49,6 +50,7 @@ class EC2Definition(MachineDefinition):
         self.tags = config["ec2"]["tags"]
         self.root_disk_size = config["ec2"]["ebsInitialRootDiskSize"]
         self.spot_instance_price = config["ec2"]["spotInstancePrice"]
+        self.spot_instance_timeout = config["ec2"]["spotInstanceTimeout"]
         self.ebs_optimized = config["ec2"]["ebsOptimized"]
         self.subnet_id = config["ec2"]["subnetId"]
         self.associate_public_ip_address = config["ec2"]["associatePublicIpAddress"]
@@ -149,6 +151,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
             self.dns_hostname = None
             self.dns_ttl = None
             self.subnet_id = None
+
             self.client_token = None
             self.spot_instance_request_id = None
 
@@ -598,15 +601,17 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
                     self.public_ipv4 = None
                     self.ssh_pinged = False
 
-
-    def _get_network_interfaces(self, defn):
-        groups = defn.security_group_ids
-
-        sg_names = filter(lambda g: not g.startswith('sg-'), defn.security_group_ids)
+    def security_groups_to_ids(self, subnetId, groups):
+        sg_names = filter(lambda g: not g.startswith('sg-'), groups)
         if sg_names != []:
             self.connect_vpc()
-            vpc_id = self._conn_vpc.get_all_subnets([defn.subnet_id])[0].vpc_id
-            groups = map(lambda g: nixops.ec2_utils.name_to_security_group(self._conn, g, vpc_id), defn.security_group_ids)
+            vpc_id = self._conn_vpc.get_all_subnets([subnetId])[0].vpc_id
+            groups = map(lambda g: nixops.ec2_utils.name_to_security_group(self._conn, g, vpc_id), groups)
+
+        return groups
+
+    def _get_network_interfaces(self, defn):
+        groups = self.security_groups_to_ids(defn.subnet_id, defn.security_group_ids)
 
         return boto.ec2.networkinterface.NetworkInterfaceCollection(
             boto.ec2.networkinterface.NetworkInterfaceSpecification(
@@ -643,6 +648,12 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
 
         if defn.spot_instance_price:
             if self.spot_instance_request_id is None:
+
+                if defn.spot_instance_timeout:
+                    common_args['valid_until'] = \
+                        (datetime.datetime.now() +
+                         datetime.timedelta(0, defn.spot_instance_timeout)).isoformat()
+
                 # FIXME: Should use a client token here, but
                 # request_spot_instances doesn't support one.
                 request = self._retry(
@@ -664,6 +675,10 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
                 request = self._get_spot_instance_request_by_id(self.spot_instance_request_id)
                 self.log_continue("[{0}] ".format(request.status.code))
                 if request.status.code == "fulfilled": break
+                if request.status.code in {"schedule-expired", "canceled-before-fulfillment", "bad-parameters", "system-error"}:
+                    self.spot_instance_request_id = None
+                    self.log_end("")
+                    raise Exception("spot instance request failed with result ‘{0}’".format(request.status.code))
                 time.sleep(3)
             self.log_end("")
 
@@ -771,7 +786,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
 
         # Stop the instance (if allowed) to change instance attributes
         # such as the type.
-        if self.vm_id and allow_reboot and self._booted_from_ebs() and ( self.instance_type != defn.instance_type or self.ebs_optimized != defn.ebs_optimized):
+        if self.vm_id and allow_reboot and self._booted_from_ebs() and (self.instance_type != defn.instance_type or self.ebs_optimized != defn.ebs_optimized):
             self.stop()
             check = True
 
@@ -779,6 +794,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
         # backs.  Restart stopped instances.
         if self.vm_id and check:
             instance = self._get_instance(allow_missing=True)
+
             if instance is None or instance.state in {"shutting-down", "terminated"}:
                 if not allow_recreate:
                     raise Exception("EC2 instance ‘{0}’ went away; use ‘--allow-recreate’ to create a new one".format(self.name))
@@ -924,6 +940,14 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
                     ", ".join(set(self.security_groups)),
                     ", ".join(set(defn.security_groups)))
             )
+        instance = self._get_instance()
+
+        instance_groups = [g.id for g in instance.groups]
+        new_instance_groups = self.security_groups_to_ids(defn.subnet_id, defn.security_group_ids)
+        if defn.subnet_id and instance.vpc_id and set(instance_groups) != set(new_instance_groups):
+            self.log("updating security groups from {0} to {1}...".format(instance_groups, new_instance_groups))
+            instance.modify_attribute("groupSet", new_instance_groups)
+
         if defn.placement_group != (self.placement_group or ""):
             self.warn(
                 'cannot change placement group of an existing instance (from ‘{0}’ to ‘{1}’)'.format(

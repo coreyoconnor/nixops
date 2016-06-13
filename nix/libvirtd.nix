@@ -47,6 +47,14 @@ in
       '';
     };
 
+    deployment.libvirtd.vcpu = mkOption {
+      default = 1;
+      type = types.int;
+      description = ''
+        Number of Virtual CPUs.
+      '';
+    };
+
     deployment.libvirtd.memorySize = mkOption {
       default = 512;
       type = types.int;
@@ -129,6 +137,10 @@ in
           '';
         };
       };
+    deployment.libvirtd.extraDomainXML = mkOption {
+      default = "";
+      type = types.str;
+      description = "Additional XML appended at the end of domain xml. See https://libvirt.org/formatdomain.html";
     };
   };
 
