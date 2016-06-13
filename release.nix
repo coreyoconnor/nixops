@@ -1,10 +1,9 @@
 { nixopsSrc ? { outPath = ./.; revCount = 0; shortRev = "abcdef"; rev = "HEAD"; }
 , officialRelease ? false
+, pkgs ? import <nixpkgs> { }
 }:
 
 let
-
-  pkgs = import <nixpkgs> { };
 
   version = "1.4" + (if officialRelease then "" else "pre${toString nixopsSrc.revCount}_${nixopsSrc.shortRev}");
 

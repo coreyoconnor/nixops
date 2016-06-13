@@ -137,6 +137,7 @@ in
           '';
         };
       };
+    };
     deployment.libvirtd.extraDomainXML = mkOption {
       default = "";
       type = types.str;
