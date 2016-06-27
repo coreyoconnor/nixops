@@ -324,7 +324,7 @@ rec {
   # are not set yet, so we fake arguments to be able to evaluate the require attribute of
   # the nixops network expressions.
 
-  dummyArgs = f: builtins.listToAttrs (map (a: lib.nameValuePair a null) (builtins.attrNames (builtins.functionArgs f)));
+  dummyArgs = f: builtins.listToAttrs (map (a: lib.nameValuePair a false) (builtins.attrNames (builtins.functionArgs f)));
 
   getNixOpsExprs = l: lib.unique (lib.flatten (map getRequires l));
 
@@ -344,10 +344,10 @@ rec {
       nixopsExpr = import f;
     in
       if builtins.isFunction nixopsExpr then
-        (builtins.attrNames (builtins.functionArgs nixopsExpr))
+        map (a: { "${a}" = builtins.toString f; } ) (builtins.attrNames (builtins.functionArgs nixopsExpr))
       else [];
 
-  getNixOpsArgs = fs: lib.sort builtins.lessThan (lib.unique (lib.concatMap fileToArgs (getNixOpsExprs fs)));
+  getNixOpsArgs = fs: lib.zipAttrs (lib.unique (lib.concatMap fileToArgs (getNixOpsExprs fs)));
 
   nixopsArguments = getNixOpsArgs networkExprs;
 }
