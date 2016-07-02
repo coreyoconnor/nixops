@@ -17,6 +17,7 @@ let
     ${pkgs.libxslt.bin or pkgs.libxslt}/bin/xsltproc \
       --stringparam revision '${revision}' \
       --stringparam program 'nixops' \
+      --nonet \
       -o $out ${<nixpkgs/nixos/doc/manual/options-to-docbook.xsl>} ${optionsXML}
   '';
 
