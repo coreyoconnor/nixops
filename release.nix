@@ -50,7 +50,7 @@ rec {
           substituteInPlace $i --subst-var-by version ${version}
         done
 
-        make -C doc/manual install docdir=$out/manual mandir=$TMPDIR/man
+        make -C doc/manual install docdir=$out/manual mandir=$TMPDIR/man docbook5_xsl=${pkgs.docbook5_xsl}
 
         releaseName=nixops-$VERSION
         mkdir ../$releaseName
