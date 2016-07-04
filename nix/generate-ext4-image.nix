@@ -19,7 +19,7 @@ let
   }).config;
 
 in pkgs.vmTools.runInLinuxVM (
-  pkgs.runCommand "libvirtd-image"
+  pkgs.runCommand name
     { memSize = 768;
       preVM =
         ''
@@ -32,6 +32,7 @@ in pkgs.vmTools.runInLinuxVM (
           mv $diskImage $out/disk.qcow2
         '';
       buildInputs = [ pkgs.utillinux pkgs.perl ];
+      passAsFile = [];
     }
     ''
       # Create a single / partition.

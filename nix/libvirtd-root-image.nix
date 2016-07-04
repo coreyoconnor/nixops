@@ -33,6 +33,7 @@ in pkgs.vmTools.runInLinuxVM (
       buildInputs = [ pkgs.utillinux pkgs.perl ];
       exportReferencesGraph =
         [ "closure" config.system.build.toplevel ];
+      passAsFile = [];
     }
     ''
       # Create a single / partition.
@@ -66,11 +67,12 @@ in pkgs.vmTools.runInLinuxVM (
 
       # Register the paths in the Nix database.
       printRegistration=1 perl ${pkgs.pathsFromGraph} /tmp/xchg/closure | \
-          chroot /mnt ${config.nix.package}/bin/nix-store --load-db
+          chroot /mnt ${config.nix.package.out}/bin/nix-store --load-db --option build-users-group ""
 
       # Create the system profile to allow nixos-rebuild to work.
-      chroot /mnt ${config.nix.package}/bin/nix-env \
-          -p /nix/var/nix/profiles/system --set ${config.system.build.toplevel}
+      chroot /mnt ${config.nix.package.out}/bin/nix-env \
+          -p /nix/var/nix/profiles/system --set ${config.system.build.toplevel} \
+          --option build-users-group ""
 
       # `nixos-rebuild' requires an /etc/NIXOS.
       mkdir -p /mnt/etc/nixos
@@ -88,4 +90,3 @@ in pkgs.vmTools.runInLinuxVM (
       umount /mnt
     ''
 )
-

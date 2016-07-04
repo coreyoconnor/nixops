@@ -20,6 +20,7 @@ let
           ''
             mv $diskImage $out/disk.qcow2
           '';
+        passAsFile = [];
       }
       ''
         . /sys/class/block/vda1/uevent
