@@ -83,10 +83,12 @@ rec {
         { inherit pkgs uuid name resources; nodes = info.machines; }
       ).config) ["_module"]) _resources;
 
+  resources.sshKeyPairs = evalResources ./ssh-keypair.nix (zipAttrs resourcesByType.sshKeyPairs or []);
+
   # Amazon resources
+  resources.snsTopics = evalResources ./sns-topic.nix (zipAttrs resourcesByType.snsTopics or []);
   resources.sqsQueues = evalResources ./sqs-queue.nix (zipAttrs resourcesByType.sqsQueues or []);
   resources.ec2KeyPairs = evalResources ./ec2-keypair.nix (zipAttrs resourcesByType.ec2KeyPairs or []);
-  resources.sshKeyPairs = evalResources ./ssh-keypair.nix (zipAttrs resourcesByType.sshKeyPairs or []);
   resources.s3Buckets = evalResources ./s3-bucket.nix (zipAttrs resourcesByType.s3Buckets or []);
   resources.iamRoles = evalResources ./iam-role.nix (zipAttrs resourcesByType.iamRoles or []);
   resources.ec2SecurityGroups = evalResources ./ec2-security-group.nix (zipAttrs resourcesByType.ec2SecurityGroups or []);
@@ -94,7 +96,14 @@ rec {
   resources.ebsVolumes = evalResources ./ebs-volume.nix (zipAttrs resourcesByType.ebsVolumes or []);
   resources.elasticIPs = evalResources ./elastic-ip.nix (zipAttrs resourcesByType.elasticIPs or []);
   resources.rdsDbInstances = evalResources ./ec2-rds-dbinstance.nix (zipAttrs resourcesByType.rdsDbInstances or []);
+  resources.elasticFileSystems = evalResources ./elastic-file-system.nix (zipAttrs resourcesByType.elasticFileSystems or []);
+  resources.elasticFileSystemMountTargets = evalResources ./elastic-file-system-mount-target.nix (zipAttrs resourcesByType.elasticFileSystemMountTargets or []);
   resources.machines = mapAttrs (n: v: v.config) nodes;
+
+  # Datadog resources
+  resources.datadogMonitors = evalResources ./datadog-monitor.nix (zipAttrs resourcesByType.datadogMonitors or []);
+  resources.datadogTimeboards = evalResources ./datadog-timeboard.nix (zipAttrs resourcesByType.datadogTimeboards or []);
+  resources.datadogScreenboards = evalResources ./datadog-screenboard.nix (zipAttrs resourcesByType.datadogScreenboards or []);
 
   # Azure resources
   resources.azureAvailabilitySets = evalAzureResources ./azure-availability-set.nix (zipAttrs resourcesByType.azureAvailabilitySets or []);
@@ -230,7 +239,7 @@ rec {
 
   gce_default_bootstrap_images = flip mapAttrs' gce_deployments (name: depl:
     let
-      gce = (scrubOptionValue depl).config.deployment.gce; 
+      gce = (scrubOptionValue depl).config.deployment.gce;
       images = {
         "14.12" = "gs://nixos-cloud-images/nixos-14.12.471.1f09b77-x86_64-linux.raw.tar.gz";
         "15.09" = "gs://nixos-cloud-images/nixos-15.09.425.7870f20-x86_64-linux.raw.tar.gz";

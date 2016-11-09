@@ -160,9 +160,7 @@ let
 
   nixosVersion = builtins.substring 0 5 config.system.nixosVersion;
 
-  amis =
-    let p = pkgs.path + "/nixos/modules/virtualisation/ec2-amis.nix"; in
-    if pathExists p then import p else import ./ec2-amis.nix;
+  amis = import <nixpkgs/nixos/modules/virtualisation/ec2-amis.nix>;
 
 in
 
@@ -185,8 +183,10 @@ in
         deployment model, but looked up in the file
         <filename>~/.ec2-keys</filename>, which should specify, on
         each line, an Access Key ID followed by the corresponding
-        Secret Access Key.  If it does not appear in that file, the
-        environment variables environment variables
+        Secret Access Key. If the lookup was unsuccessful it is continued
+        in the standard AWS tools <filename>~/.aws/credentials</filename> file.
+        If it does not appear in these files, the
+        environment variables
         <envar>EC2_SECRET_KEY</envar> or
         <envar>AWS_SECRET_ACCESS_KEY</envar> are used.
       '';
@@ -197,7 +197,7 @@ in
       example = "us-east-1";
       type = types.str;
       description = ''
-        Amazon EC2 region in which the instance is to be deployed.
+        AWS region in which the instance is to be deployed.
         This option only applies when using EC2.  It implicitly sets
         <option>deployment.ec2.ami</option>.
       '';
@@ -230,8 +230,8 @@ in
       type = types.int;
       description = ''
         Preferred size (G) of the root disk of the EBS-backed instance. By
-        default, EBS-backed images have a root disk of 20G. Only supported
-        on creation of the instance.
+        default, EBS-backed images have a size determined by the
+        AMI. Only supported on creation of the instance.
       '';
     };
 
@@ -310,7 +310,7 @@ in
     };
 
     deployment.ec2.securityGroupIds = mkOption {
-      default = [];
+      default = [ "default" ];
       type = types.listOf types.str;
       description = ''
         Security Group IDs for the instance. Necessary if starting
@@ -403,9 +403,9 @@ in
       type = types.int;
       description = ''
         The duration (in seconds) that the spot instance request is
-	valid. If the request cannot be satisfied in this amount of
-	time, the request will be cancelled automatically, and NixOps
-	will fail with an error message. The default (0) is no timeout.
+        valid. If the request cannot be satisfied in this amount of
+        time, the request will be cancelled automatically, and NixOps
+        will fail with an error message. The default (0) is no timeout.
       '';
     };
 
@@ -452,7 +452,7 @@ in
             if cfg.ebsBoot then "hvm-ebs" else "hvm-s3"
           else
             if cfg.ebsBoot then "pv-ebs" else "pv-s3";
-        amis' = amis."${nixosVersion}" or amis."15.09"; # default to 15.09 images
+        amis' = amis."${nixosVersion}" or amis.latest;
       in
         with builtins;
         if hasAttr cfg.region amis' then

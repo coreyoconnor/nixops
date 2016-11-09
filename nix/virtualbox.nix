@@ -134,15 +134,15 @@ in
         size = mkDefault 0;
         baseImage = mkDefault (
           let
-            unpack = name: sha256: pkgsNative.runCommand "virtualbox-nixops-${name}.vdi" { preferLocalBuild = true; allowSubstitutes = false; }
+            unpack = name: sha256: pkgsNative.runCommand "virtualbox-nixops-${name}.vmdk" { preferLocalBuild = true; allowSubstitutes = false; }
               ''
                 xz -d < ${pkgsNative.fetchurl {
-                  url = "http://nixos.org/releases/nixos/virtualbox-nixops-images/virtualbox-nixops-${name}.vdi.xz";
+                  url = "http://nixos.org/releases/nixos/virtualbox-nixops-images/virtualbox-nixops-${name}.vmdk.xz";
                   inherit sha256;
                 }} > $out
               '';
           in if config.nixpkgs.system == "x86_64-linux" then
-            unpack "15.09.495.4e18cdd" "6f10bff25f22849a144793d0bd77ac5ea43ec1debadd1aa91c7202c1693dff2c"
+            unpack "16.09.877.5b08a40" "c20ee9ff0f58b10cd2b1e52411a56a862c8eaecddbbddd337ae0cca888f6727f"
           else
             throw "Unsupported VirtualBox system type!"
         );

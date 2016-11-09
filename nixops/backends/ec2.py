@@ -490,7 +490,9 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
                 isinstance(r, nixops.resources.ec2_security_group.EC2SecurityGroupState) or
                 isinstance(r, nixops.resources.ec2_placement_group.EC2PlacementGroupState) or
                 isinstance(r, nixops.resources.ebs_volume.EBSVolumeState) or
-                isinstance(r, nixops.resources.elastic_ip.ElasticIPState)}
+                isinstance(r, nixops.resources.elastic_ip.ElasticIPState) or
+                isinstance(r, nixops.resources.elastic_file_system.ElasticFileSystemState) or
+                isinstance(r, nixops.resources.elastic_file_system_mount_target.ElasticFileSystemMountTargetState)}
 
 
     def attach_volume(self, device, volume_id):
@@ -603,7 +605,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
 
     def security_groups_to_ids(self, subnetId, groups):
         sg_names = filter(lambda g: not g.startswith('sg-'), groups)
-        if sg_names != []:
+        if sg_names != [ ] and subnetId != "":
             self.connect_vpc()
             vpc_id = self._conn_vpc.get_all_subnets([subnetId])[0].vpc_id
             groups = map(lambda g: nixops.ec2_utils.name_to_security_group(self._conn, g, vpc_id), groups)
@@ -1026,11 +1028,14 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
             if v.get('needsAttach', False):
                 volume = nixops.ec2_utils.get_volume_by_id(self._conn, v['volumeId'], allow_missing=True)
                 if volume: continue
-                if not allow_recreate:
-                    raise Exception("volume ‘{0}’ (used by EC2 instance ‘{1}’) no longer exists; "
-                                    "run ‘nixops stop’, then ‘nixops deploy --allow-recreate’ to create a new, empty volume"
-                                    .format(v['volumeId'], self.name))
-                self.warn("volume ‘{0}’ has disappeared; will create an empty volume to replace it".format(v['volumeId']))
+                if k not in defn.block_device_mapping:
+                    self.warn("forgetting about volume ‘{0}’ that no longer exists and is no longer needed by the deployment specification".format(v['volumeId']))
+                else:
+                    if not allow_recreate:
+                        raise Exception("volume ‘{0}’ (used by EC2 instance ‘{1}’) no longer exists; "
+                                        "run ‘nixops stop’, then ‘nixops deploy --allow-recreate’ to create a new, empty volume"
+                                        .format(v['volumeId'], self.name))
+                    self.warn("volume ‘{0}’ has disappeared; will create an empty volume to replace it".format(v['volumeId']))
                 self.update_block_device_mapping(k, None)
 
         # Create missing volumes.
@@ -1128,7 +1133,7 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
 
         self.dns_hostname = defn.dns_hostname
         self.dns_ttl = defn.dns_ttl
-        self.route53_access_key_id = defn.route53_access_key_id
+        self.route53_access_key_id = defn.route53_access_key_id or nixops.ec2_utils.get_access_key_id()
         self.route53_use_public_dns_name = defn.route53_use_public_dns_name
         record_type = 'CNAME' if self.route53_use_public_dns_name else 'A'
         dns_value = self.public_dns_name if self.route53_use_public_dns_name else self.public_ipv4
@@ -1222,6 +1227,9 @@ class EC2State(MachineState, nixops.resources.ec2_common.EC2CommonState):
 
         if not (self.vm_id or self.client_token): return True
         if not self.depl.logger.confirm("are you sure you want to destroy EC2 machine ‘{0}’?".format(self.name)): return False
+
+        if wipe:
+            log.warn("wipe is not supported")
 
         self.log_start("destroying EC2 machine... ".format(self.name))
 
