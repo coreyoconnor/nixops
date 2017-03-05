@@ -130,17 +130,14 @@ class LibvirtdState(MachineState):
         return "{0}/{1}.img".format(defn.image_dir, self._vm_id())
 
     def _extra_disk_base_image_path(self, defn, disk_name, disk_defn):
-        if hasattr(disk_defn, 'baseImage') and disk_defn['baseImage']:
-          return disk_defn['baseImage']
-        else:
-          image_build = self._logged_exec(
-              ["nix-build"] + self.depl._nix_path_flags() +
-              ["<nixops/generate-ext4-image.nix>",
-               "--arg", "size", disk_defn['size'],
-               "--argstr", "name", disk_name,
-               "-o", "{0}/libvirtd-image-{1}-{2}".format(self.depl.tempdir, self.name, disk_name)],
-              capture_stdout=True).rstrip()
-          return image_build + "/disk.qcow2"
+        image_build = self._logged_exec(
+            ["nix-build"] + self.depl._nix_path_flags() +
+            ["<nixops/generate-ext4-image.nix>",
+              "--arg", "size", disk_defn['size'],
+              "--argstr", "name", disk_name,
+              "-o", "{0}/libvirtd-image-{1}-{2}".format(self.depl.tempdir, self.name, disk_name)],
+            capture_stdout=True).rstrip()
+        return image_build + "/disk.qcow2"
 
     def _copy_extra_disks(self, defn):
         out = {}
