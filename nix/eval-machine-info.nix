@@ -98,6 +98,8 @@ rec {
   resources.rdsDbInstances = evalResources ./ec2-rds-dbinstance.nix (zipAttrs resourcesByType.rdsDbInstances or []);
   resources.elasticFileSystems = evalResources ./elastic-file-system.nix (zipAttrs resourcesByType.elasticFileSystems or []);
   resources.elasticFileSystemMountTargets = evalResources ./elastic-file-system-mount-target.nix (zipAttrs resourcesByType.elasticFileSystemMountTargets or []);
+  resources.cloudwatchLogGroups = evalResources ./cloudwatch-log-group.nix (zipAttrs resourcesByType.cloudwatchLogGroups or []);
+  resources.cloudwatchLogStreams = evalResources ./cloudwatch-log-stream.nix (zipAttrs resourcesByType.cloudwatchLogStreams or []);
   resources.machines = mapAttrs (n: v: v.config) nodes;
 
   # Datadog resources
@@ -219,7 +221,7 @@ rec {
         blobType = "PageBlob";
         copyFromBlob = if args ? azure-image-url
                        then args.azure-image-url
-                       else "https://nixos.blob.core.windows.net/images/nixos-image-16.03.847.8688c17-x86_64-linux.vhd";
+                       else "https://nixos.blob.core.windows.net/images/nixos-image-16.09.1694.019dcc3-x86_64-linux.vhd";
       })]
     )
   ) azure_deployments;
@@ -244,6 +246,7 @@ rec {
         "14.12" = "gs://nixos-cloud-images/nixos-14.12.471.1f09b77-x86_64-linux.raw.tar.gz";
         "15.09" = "gs://nixos-cloud-images/nixos-15.09.425.7870f20-x86_64-linux.raw.tar.gz";
         "16.03" = "gs://nixos-cloud-images/nixos-image-16.03.847.8688c17-x86_64-linux.raw.tar.gz";
+        "17.03" = "gs://nixos-cloud-images/nixos-image-17.03.1082.4aab5c5798-x86_64-linux.raw.tar.gz";
       };
     in (
       nameValuePair ("bootstrap") [({ pkgs, ...}: {
@@ -262,10 +265,11 @@ rec {
 
     machines =
       flip mapAttrs nodes (n: v': let v = scrubOptionValue v'; in
-        { inherit (v.config.deployment) targetEnv targetPort targetHost encryptedLinksTo storeKeysOnMachine alwaysActivate owners keys;
+        { inherit (v.config.deployment) targetEnv targetPort targetHost encryptedLinksTo storeKeysOnMachine alwaysActivate owners keys hasFastConnection;
           nixosRelease = v.config.system.nixosRelease or (removeSuffix v.config.system.nixosVersionSuffix v.config.system.nixosVersion);
           azure = optionalAttrs (v.config.deployment.targetEnv == "azure")  v.config.deployment.azure;
           ec2 = optionalAttrs (v.config.deployment.targetEnv == "ec2") v.config.deployment.ec2;
+          digitalOcean = optionalAttrs (v.config.deployment.targetEnv == "digitalOcean") v.config.deployment.digitalOcean;
           gce = optionalAttrs (v.config.deployment.targetEnv == "gce") v.config.deployment.gce;
           hetzner = optionalAttrs (v.config.deployment.targetEnv == "hetzner") v.config.deployment.hetzner;
           container = optionalAttrs (v.config.deployment.targetEnv == "container") v.config.deployment.container;
@@ -276,6 +280,7 @@ rec {
               // { disks = mapAttrs (n: v: v //
                 { baseImage = if isDerivation v.baseImage then "drv" else toString v.baseImage; }) cfg.disks; });
           libvirtd = optionalAttrs (v.config.deployment.targetEnv == "libvirtd") v.config.deployment.libvirtd;
+          publicIPv4 = v.config.networking.publicIPv4;
         }
       );
 

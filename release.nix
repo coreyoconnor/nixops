@@ -5,7 +5,7 @@
 
 let
 
-  version = "1.5" + (if officialRelease then "" else "pre${toString nixopsSrc.revCount}_${nixopsSrc.shortRev}");
+  version = "1.5.1" + (if officialRelease then "" else "pre${toString nixopsSrc.revCount}_${nixopsSrc.shortRev}");
 
 in
 
@@ -33,9 +33,12 @@ rec {
       ''
         # Generate the manual and the man page.
         cp ${import ./doc/manual { revision = nixopsSrc.rev; }} doc/manual/machine-options.xml
+
+        # IMPORTANT: when adding a file here, also populate doc/manual/manual.xml
         ${pkgs.lib.concatMapStrings (fn: ''
           cp ${import ./doc/manual/resource.nix { revision = nixopsSrc.rev; module = ./nix + ("/" + fn + ".nix"); }} doc/manual/${fn}-options.xml
         '') [ "ebs-volume" "sns-topic" "sqs-queue" "ec2-keypair" "s3-bucket" "iam-role" "ssh-keypair" "ec2-security-group" "elastic-ip"
+              "cloudwatch-log-group" "cloudwatch-log-stream"
               "gce-disk" "gce-image" "gce-forwarding-rule" "gce-http-health-check" "gce-network"
               "gce-static-ip" "gce-target-pool" "gse-bucket"
               "datadog-monitor" "datadog-timeboard" "datadog-screenboard"
@@ -87,8 +90,10 @@ rec {
           azure-mgmt-resource
           azure-mgmt-storage
           adal
-          sqlite
+          # Go back to sqlite once Python 2.7.13 is released
+          pysqlite
           datadog
+          digital-ocean
         ];
 
       # For "nix-build --run-env".

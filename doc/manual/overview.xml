@@ -62,6 +62,7 @@ to the configuration. Otherwise, VirtualBox will fail when it tries to open a gr
     { config, pkgs, ... }:
     { deployment.targetEnv = "virtualbox";
       deployment.virtualbox.memorySize = 1024; # megabytes
+      deployment.virtualbox.vcpu = 2; # number of cpus
     };
 }
 </programlisting>
@@ -335,6 +336,28 @@ in
 
 </section>
 
+<section xml:id="sec-deploying-to-ec2"><title>Deploying to a NixOS machine</title>
+
+<para>To deploy to a machine that is already running NixOS, simply set
+<varname>deployment.targetHost</varname> to the IP address or host name of the machine,
+and leave <varname>deployment.targetEnv</varname> undefined.
+See <xref linkend="ex-physical-nixos.nix" />.
+</para>
+
+<example xml:id="ex-physical-nixos.nix">
+  <title><filename>trivial-nixos.nix</filename>: NixOS target physical network specification</title>
+<programlisting>
+{
+  webserver =
+    { config, pkgs, ... }:
+    { deployment.targetHost = "1.2.3.4";
+    };
+}
+</programlisting>
+</example>
+
+</section>
+
 <section xml:id="sec-deploying-to-ec2"><title>Deploying to Amazon EC2</title>
 
 <para><xref linkend="ex-physical-multi-ec2.nix" /> shows a physical
@@ -528,12 +551,6 @@ let
   };
 
 in {
-
-  # use nixos-unstable image
-  # this specification is identical to the default one and can omitted
-  resources.gceImages.bootstrap = credentials // {
-    sourceUri = "gs://nixos/nixos-14.10pre-git-x86_64-linux.raw.tar.gz";
-  };
 
   # create a network that allows SSH traffic(by default), pings
   # and HTTP traffic for machines tagged "public-http"
@@ -1400,6 +1417,46 @@ and destruction.</para>
 
 </section>
 
+
+<section xml:id="sec-deploying-to-digital-ocean"><title>Deploying to Digital Ocean</title>
+
+<para><xref linkend="ex-trivial-digital-ocean.nix" /> shows how to run
+a <literal>512m</literal> digital ocean instance in the
+<literal>ams2</literal> region, with IPv6 support enabled. We only
+support droplet creation and destruction at the moment.
+</para>
+
+<para>Note that we rely on a ssh key resource with the hard-coded name
+<literal>ssh-key</literal>. Providing your own key is not supported yet.
+</para>
+
+<example xml:id="ex-trivial-digital-ocean.nix">
+  <title><filename>trivial-digital-ocean.nix</filename>: A trivial digital ocean setup</title>
+<programlisting>
+{
+  resources.sshKeyPairs.ssh-key = {};
+
+  machine = { config, pkgs, ... }: {
+    services.nginx.enable = true;
+    services.openssh.enable = true;
+
+    deployment.targetEnv = "digitalOcean";
+    deployment.digitalOcean.enableIpv6 = true;
+    deployment.digitalOcean.region = "ams2";
+    deployment.digitalOcean.size = "512mb";
+  };
+}
+</programlisting>
+</example>
+
+<para>To install we first start a Ubuntu instance, and then overwrite
+it with NixOS via a modified version of <link
+xlink:href="https://github.com/elitak/nixos-infect">nixos-infect</link>
+. <literal>nixos-infect</literal> itself uses the undocumented
+<literal>NIXOS_LUSTRATE</literal> under the hood.
+</para>
+</section>
+
 <section><title>Deploying to Libvirtd (Qemu)</title>
 
 
@@ -1446,7 +1503,24 @@ and libvirtd specification <literal>example-libvirtd.nix</literal>:
 </programlisting>
 </para>
 
+<para>Finally, let's deploy it with NixOps:
+
+<programlisting>
+  $ nixops create -d example-libvirtd ./example.nix ./example-libvirtd.nix
+  $ nixops deploy -d example-libvirtd
+</programlisting>
+</para>
+
+<warning>
+<para>Note that headless mode has to be turned ON for the moment in order to
+  avoid X permissions error currently
+  <link xlink:href="https://github.com/NixOS/nixops/issues/422">
+  known to be broken upstream</link>
+</para>
+</warning>
+
 <note>
+
 <title>Serial console:</title>
 <para>If you want to access the serial console of the guest (<literal>virsh
 console</literal>) we also need the following:
@@ -1468,22 +1542,6 @@ deployment.libvirtd.extraDevicesXML = ''
 <tip>In order to log in you have to set a (root) password.</tip>
 </para>
 </note>
-
-<para>Finally, let's deploy it with NixOps:
-
-<programlisting>
-  $ nixops create -d example-libvirtd ./example.nix ./example-libvirtd.nix
-  $ nixops deploy -d example-libvirtd
-</programlisting>
-</para>
-
-<warning>
-<para>Note that headless mode has to be turned ON for the moment in order to
-  avoid X permissions error currently
-  <link xlink:href="https://github.com/NixOS/nixops/issues/422">
-  known to be broken upstream</link>
-</para>
-</warning>
 
 </section>
 
@@ -1684,6 +1742,88 @@ deploy the new configuration.
 
 </para>
 
+</section>
+
+<section>
+  <title>Managing keys</title>
+
+  <para>
+    Files in <filename>/nix/store/</filename> are readable by every
+    user on that host, so storing secret keys embedded in nix derivations
+    is insecure. To address this, nixops provides the configuration
+    option <varname>deployment.keys</varname>, which nixops manages
+    separately from the main configuration derivation for each machine.
+  </para>
+
+  <para>
+    Add a key to a machine like so.
+
+    <screen>
+{
+  machine =
+    { config, pkgs, ... }:
+    {
+      deployment.keys.my-secret.text = "shhh this is a secret";
+      deployment.keys.my-secret.user = "myuser";
+      deployment.keys.my-secret.group = "wheel";
+      deployment.keys.my-secret.permissions = "0640";
+    };
+}
+    </screen>
+
+    This will create a file <filename>/run/keys/my-secret</filename>
+    with the specified contents, ownership, and permissions.
+  </para>
+
+  <para>
+    Among the key options, only <varname>text</varname> is required. The
+    <varname>user</varname> and <varname>group</varname> options both default
+    to <literal>"root"</literal>, and <varname>permissions</varname> defaults
+    to <literal>"0600"</literal>.
+  </para>
+
+  <para>
+    Keys from <varname>deployment.keys</varname> are stored under <filename>/run/</filename>
+    on a temporary filesystem and will not persist across a reboot.
+    To send a rebooted machine its keys, use <command>nixops send-keys</command>. Note that all
+    <command>nixops</command> commands implicitly upload keys when appropriate,
+    so manually sending keys should only be necessary after an unattended reboot.
+  </para>
+
+  <para>
+    If you have a custom service that depends on a key from <varname>deployment.keys</varname>,
+    you can opt to let systemd track that dependency. Each key gets a corresponding
+    systemd service <literal>"${keyname}-key.service"</literal> which is active
+    while the key is present, and otherwise inactive when the key is absent. See
+    <xref linkend="key-dependency.nix" /> for how to set this up.
+
+    <example xml:id="key-dependency.nix">
+      <title><filename>key-dependency.nix</filename>: track key dependence with systemd</title>
+      <programlisting>
+{
+  machine =
+    { config, pkgs, ... }:
+    {
+      deployment.keys.my-secret.text = "shhh this is a secret";
+
+      systemd.services.my-service = {
+        after = [ "my-secret-key.service" ];
+        wants = [ "my-secret-key.service" ];
+        script = ''
+          export MY_SECRET=$(cat /run/keys/my-secret)
+          run-my-program
+        '';
+      };
+    };
+}
+      </programlisting>
+    </example>
+
+    These dependencies will ensure that the service is only started when the keys it
+    requires are present. For example, after a reboot, the services will be delayed
+    until the keys are available, and <command>systemctl status</command> and friends
+    will lead you to the cause.
+  </para>
 </section>
 
 <!--

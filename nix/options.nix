@@ -12,6 +12,7 @@ in
 
   imports =
     [ ./ec2.nix
+      ./digital-ocean.nix
       ./azure.nix
       ./route53.nix
       ./virtualbox.nix
@@ -102,6 +103,20 @@ in
       '';
     };
 
+    deployment.hasFastConnection = mkOption {
+      default = false;
+      type = types.bool;
+      description = ''
+        If set to <literal>true</literal>, whole closure will be copied using just `nix-copy-closure`.
+
+        If set to <literal>false</literal>, closure will be copied first using binary substitution.
+        Addtionally, any missing derivations copied with `nix-copy-closure` will be done
+        using <literal>--gzip</literal> flag.
+
+        Some backends set this value to <literal>true</literal>.
+      '';
+    };
+
     # Computed options useful for referring to other machines in
     # network specifications.
 
@@ -117,8 +132,9 @@ in
     };
 
     networking.publicIPv4 = mkOption {
+      default = null;
       example = "198.51.100.123";
-      type = types.str;
+      type = types.nullOr types.str;
       description = ''
         Publicly routable IPv4 address of this machine.
       '';

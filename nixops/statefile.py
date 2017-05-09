@@ -3,7 +3,7 @@
 import nixops.deployment
 import os
 import os.path
-import sqlite3
+from pysqlite2 import dbapi2 as sqlite3
 import sys
 import threading
 
@@ -11,6 +11,9 @@ import threading
 class Connection(sqlite3.Connection):
 
     def __init__(self, db_file, **kwargs):
+        db_exists = os.path.exists(db_file)
+        if not db_exists:
+            os.fdopen(os.open(db_file, os.O_WRONLY | os.O_CREAT, 0o600), 'w').close()
         sqlite3.Connection.__init__(self, db_file, **kwargs)
         self.db_file = db_file
         self.nesting = 0
@@ -25,6 +28,8 @@ class Connection(sqlite3.Connection):
         if self.nesting == 0:
             self.must_rollback = False
         self.nesting = self.nesting + 1
+        sqlite3.Connection.__enter__(self)
+
 
     def __exit__(self, exception_type, exception_value, exception_traceback):
         if exception_type != None: self.must_rollback = True
@@ -37,7 +42,7 @@ class Connection(sqlite3.Connection):
                 except sqlite3.ProgrammingError:
                     pass
             else:
-                self.commit()
+                sqlite3.Connection.__exit__(self, exception_type, exception_value, exception_traceback)
         self.lock.release()
 
 
@@ -65,7 +70,7 @@ class StateFile(object):
 
         if os.path.splitext(db_file)[1] not in ['.nixops', '.charon']:
             raise Exception("state file ‘{0}’ should have extension ‘.nixops’".format(db_file))
-        db = sqlite3.connect(db_file, timeout=60, check_same_thread=False, factory=Connection) # FIXME
+        db = sqlite3.connect(db_file, timeout=60, check_same_thread=False, factory=Connection, isolation_level=None) # FIXME
         db.db_file = db_file
 
         db.execute("pragma journal_mode = wal")

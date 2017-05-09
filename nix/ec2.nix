@@ -138,19 +138,11 @@ let
   };
 
   isEc2Hvm =
-      cfg.instanceType == "cc1.4xlarge"
-   || cfg.instanceType == "cc2.8xlarge"
-   || cfg.instanceType == "hs1.8xlarge"
-   || cfg.instanceType == "cr1.8xlarge"
-   || builtins.substring 0 2 cfg.instanceType == "i2"
-   || builtins.substring 0 2 cfg.instanceType == "c3"
-   || builtins.substring 0 2 cfg.instanceType == "c4"
-   || builtins.substring 0 2 cfg.instanceType == "r3"
-   || builtins.substring 0 2 cfg.instanceType == "m3"
-   || builtins.substring 0 2 cfg.instanceType == "m4"
-   || builtins.substring 0 2 cfg.instanceType == "g2"
-   || builtins.substring 0 2 cfg.instanceType == "x1"
-   || builtins.substring 0 2 cfg.instanceType == "t2";
+    let
+      instanceTypeGroup = builtins.elemAt (splitString "." cfg.instanceType) 0;
+      pvGrubGroups = [ "c1" "hi1" "m1" "m2" "t1" ];
+    in
+      ! (builtins.elem instanceTypeGroup pvGrubGroups);
 
   # Map "/dev/mapper/xvdX" to "/dev/xvdX".
   dmToDevice = dev:
@@ -363,8 +355,7 @@ in
     deployment.ec2.blockDeviceMapping = mkOption {
       default = { };
       example = { "/dev/xvdb".disk = "ephemeral0"; "/dev/xvdg".disk = "vol-d04895b8"; };
-      type = types.attrsOf types.optionSet;
-      options = ec2DiskOptions;
+      type = with types; attrsOf (submodule ec2DiskOptions);
       description = ''
         Block device mapping.  <filename>/dev/xvd[a-e]</filename> must be ephemeral devices.
       '';
@@ -421,8 +412,7 @@ in
       options = {
         ec2 = mkOption {
           default = null;
-          type = types.uniq (types.nullOr types.optionSet);
-          options = ec2DiskOptions;
+          type = with types; (nullOr (submodule ec2DiskOptions));
           description = ''
             EC2 disk to be attached to this mount point.  This is
             shorthand for defining a separate

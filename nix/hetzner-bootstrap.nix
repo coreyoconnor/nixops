@@ -1,4 +1,4 @@
-with import <nixpkgs> { system = "x86_64-linux"; config.packageOverrides = pkgs : { nix = pkgs.nixUnstable.out or pkgs.nixUnstable; }; };
+with import <nixpkgs> { system = "x86_64-linux"; };
 
 let
   pkgsNative = import <nixpkgs> {};
@@ -19,6 +19,7 @@ let
       mkdir -p "$out/bin"
       ln -s "${nix}"/bin/* "$out/bin/"
       ln -s "${stdenv.shell}" "$out/bin/sh"
+      ln -s "${pkgsNative.cacert}" "$out/etc-certs"
     '';
   };
 in stdenv.mkDerivation {
@@ -42,6 +43,7 @@ in stdenv.mkDerivation {
 
       local wrapper="usr/bin/$name"
       ( echo "#!/bin/sh"
+        echo "export SSL_CERT_FILE=${pkgsNative.cacert}/etc/ssl/certs/ca-bundle.crt"
         echo "export PATH=\"$syspath/bin\''${PATH:+:}\$PATH\""
         if [ -n "$fullpath" ]; then
           echo "if chroot /mnt \"$syspath/bin/true\" > /dev/null 2>&1; then"

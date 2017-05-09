@@ -78,6 +78,7 @@ def open_deployment():
     if args.keep_failed: depl.extra_nix_flags.append("--keep-failed")
     if args.show_trace: depl.extra_nix_flags.append("--show-trace")
     if args.fallback: depl.extra_nix_flags.append("--fallback")
+    if args.no_build_output: depl.extra_nix_flags.append("--no-build-output")
     if not args.read_only_mode: depl.extra_nix_eval_flags.append("--read-write-mode")
 
     return depl
@@ -292,8 +293,12 @@ def print_backups(depl, backups):
 
 
 def op_clean_backups():
+    if args.keep and args.keep_days:
+        raise Exception("Combining of --keep and --keep-days arguments are not possible, please use one.")
+    if not (args.keep or args.keep_days):
+        raise Exception("Please specify at least --keep or --keep-days arguments.")
     depl = open_deployment()
-    depl.clean_backups(args.keep, args.keep_physical)
+    depl.clean_backups(args.keep, args.keep_days, args.keep_physical)
 
 
 def op_remove_backup():
@@ -360,7 +365,8 @@ def op_deploy():
     depl = open_deployment()
     if args.confirm:
         depl.logger.set_autoresponse("y")
-    depl.deploy(dry_run=args.dry_run, build_only=args.build_only,
+    depl.deploy(dry_run=args.dry_run, evaluate_only=args.evaluate_only,
+                build_only=args.build_only,
                 create_only=args.create_only, copy_only=args.copy_only,
                 include=args.include or [], exclude=args.exclude or [],
                 check=args.check, kill_obsolete=args.kill_obsolete,
@@ -576,6 +582,9 @@ def op_mount():
         elif flags[n] == "-p":
             new_flags.extend(["-p", flags[n+1]])
             n = n + 2
+        elif flags[n] == "-o":
+            new_flags.extend(["-o", flags[n+1]])
+            n = n + 2
         else:
             raise Exception("don't know how to pass SSH flag ‘{0}’ to sshfs".format(flags[n]))
 
@@ -701,6 +710,7 @@ def add_subparser(name, help):
     subparser.add_argument("--keep-failed", '-K', action='store_true', help='keep temporary directories of failed builds')
     subparser.add_argument('--show-trace', action='store_true', help='print a Nix stack trace if evaluation fails')
     subparser.add_argument('--fallback', action='store_true', help='fall back on installation from source')
+    subparser.add_argument('--no-build-output', action='store_true', help='suppress output written by builders')
     subparser.add_argument('--option', nargs=2, action="append", dest="nix_options", metavar=('NAME', 'VALUE'), help='set a Nix option')
     subparser.add_argument('--read-only-mode', action='store_true', help='run Nix evaluations in read-only mode')
 
@@ -765,6 +775,7 @@ subparser.add_argument('--kill-obsolete', '-k', action='store_true', help='kill 
 subparser.add_argument('--dry-run', action='store_true', help='show what will be built')
 subparser.add_argument('--dry-activate', action='store_true', help='show what will be activated on the machines in the network')
 subparser.add_argument('--repair', action='store_true', help='use --repair when calling nix-build (slow)')
+subparser.add_argument('--evaluate-only', action='store_true', help='only call nix-instantiate and exit')
 subparser.add_argument('--build-only', action='store_true', help='build only; do not perform deployment actions')
 subparser.add_argument('--create-only', action='store_true', help='exit after creating missing machines')
 subparser.add_argument('--copy-only', action='store_true', help='exit after copying closures')
@@ -872,7 +883,8 @@ subparser.add_argument('--keep-physical', dest="keep_physical", default=False, a
 
 subparser = add_subparser('clean-backups', help='remove old backups')
 subparser.set_defaults(op=op_clean_backups)
-subparser.add_argument('--keep', dest="keep", type=int, default=10, help='number of backups to keep around')
+subparser.add_argument('--keep', dest="keep", type=int, help='number of backups to keep around')
+subparser.add_argument('--keep-days', metavar="N", dest="keep_days", type=int, help='keep backups newer than N days')
 subparser.add_argument('--keep-physical', dest="keep_physical", default=False, action="store_true", help='do not remove the physical backups, only remove backups from nixops state')
 
 subparser = add_subparser('restore', help='restore machines based on snapshots of persistent disks in network (currently EC2-only)')

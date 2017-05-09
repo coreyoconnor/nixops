@@ -20,37 +20,38 @@ with lib;
               remoteIPv4 = "172.16.12.2";
             };
         };
-      type = types.attrsOf types.optionSet;
-      options = {
-        target = mkOption {
-          type = types.str;
-          description = "Host name or IP address of the remote machine.";
+      type = with types; attrsOf (submodule {
+        options = {
+          target = mkOption {
+            type = types.str;
+            description = "Host name or IP address of the remote machine.";
+          };
+          targetPort = mkOption {
+            type = types.int;
+            description = "Port number that SSH listens to on the remote machine.";
+          };
+          privateKey = mkOption {
+            type = types.path;
+            description = "Path to the private key file used to connect to the remote machine.";
+          };
+          localTunnel = mkOption {
+            type = types.int;
+            description = "Local tunnel device number.";
+          };
+          remoteTunnel = mkOption {
+            type = types.int;
+            description = "Remote tunnel device number.";
+          };
+          localIPv4 = mkOption {
+            type = types.str;
+            description = "IPv4 address of the local endpoint of the tunnel.";
+          };
+          remoteIPv4 = mkOption {
+            type = types.str;
+            description = "IPv4 address of the remote endpoint of the tunnel.";
+          };
         };
-        targetPort = mkOption {
-          type = types.int;
-          description = "Port number that SSH listens to on the remote machine.";
-        };
-        privateKey = mkOption {
-          type = types.path;
-          description = "Path to the private key file used to connect to the remote machine.";
-        };
-        localTunnel = mkOption {
-          type = types.int;
-          description = "Local tunnel device number.";
-        };
-        remoteTunnel = mkOption {
-          type = types.int;
-          description = "Remote tunnel device number.";
-        };
-        localIPv4 = mkOption {
-          type = types.str;
-          description = "IPv4 address of the local endpoint of the tunnel.";
-        };
-        remoteIPv4 = mkOption {
-          type = types.str;
-          description = "IPv4 address of the remote endpoint of the tunnel.";
-        };
-      };
+      });
       description = ''
         A set of peer-to-peer tunnels set up automatically over SSH.
       '';
@@ -73,14 +74,27 @@ with lib;
       wantedBy = [ "multi-user.target" "encrypted-links.target" ];
       partOf = [ "encrypted-links.target" ];
       after = [ "network-interfaces.target" ];
-      path = [ pkgs.nettools pkgs.openssh ];
+      path = [ pkgs.iproute pkgs.openssh ];
       # FIXME: ensure that the remote tunnel device is free
-      script =
-        "ssh -i ${v.privateKey} -x"
-        + " -o StrictHostKeyChecking=no -o PermitLocalCommand=yes -o ServerAliveInterval=20"
-        + " -o LocalCommand='ifconfig tun${toString v.localTunnel} ${v.localIPv4} pointopoint ${v.remoteIPv4} netmask 255.255.255.255; route add ${v.remoteIPv4}/32 dev tun${toString v.localTunnel}'"
-        + " -w ${toString v.localTunnel}:${toString v.remoteTunnel} ${v.target} -p ${toString v.targetPort}"
-        + " 'ifconfig tun${toString v.remoteTunnel} ${v.remoteIPv4} pointopoint ${v.localIPv4} netmask 255.255.255.255; route add ${v.localIPv4}/32 dev tun${toString v.remoteTunnel}'";
+
+      script = let
+        mkAddrConf = tun: localIP: remoteIP: concatStringsSep " && " [
+          "ip addr add ${localIP}/32 peer ${remoteIP} dev tun${toString tun}"
+          "ip link set tun${toString tun} up"
+        ];
+
+        localCommand = mkAddrConf v.localTunnel v.localIPv4 v.remoteIPv4;
+        remoteCommand = mkAddrConf v.remoteTunnel v.remoteIPv4 v.localIPv4;
+
+      in "ssh -i ${v.privateKey} -x"
+       + " -o StrictHostKeyChecking=no"
+       + " -o PermitLocalCommand=yes"
+       + " -o ServerAliveInterval=20"
+       + " -o LocalCommand='${localCommand}'"
+       + " -w ${toString v.localTunnel}:${toString v.remoteTunnel}"
+       + " ${v.target} -p ${toString v.targetPort}"
+       + " '${remoteCommand}'";
+
       serviceConfig =
         { Restart = "always";
           RestartSec = 20;

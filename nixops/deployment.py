@@ -18,7 +18,7 @@ import nixops.logger
 import nixops.parallel
 from nixops.nix_expr import RawValue, Function, Call, nixmerge, py2nix
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import getpass
 import traceback
 import glob
@@ -480,7 +480,7 @@ class Deployment(object):
             # Set system.stateVersion if the Nixpkgs version supports it.
             if nixops.util.parse_nixos_version(defn.config["nixosRelease"]) >= ["15", "09"]:
                 attrs_list.append({
-                    ('system', 'stateVersion'): Call(RawValue("lib.mkDefault"), m.state_version or '14.12')
+                    ('system', 'stateVersion'): Call(RawValue("lib.mkDefault"), m.state_version or defn.config["nixosRelease"])
                 })
 
             if self.nixos_version_suffix:
@@ -726,7 +726,7 @@ class Deployment(object):
                 # This thread shouldn't throw an exception because
                 # that will cause NixOps to exit and interrupt
                 # activation on the other machines.
-                m.logger.error(traceback.format_exc() if debug else str(e))
+                m.logger.error(traceback.format_exc())
                 return m.name
             return None
 
@@ -775,12 +775,21 @@ class Deployment(object):
 
         return backups
 
-    def clean_backups(self, keep=10, keep_physical = False):
+    def clean_backups(self, keep, keep_days, keep_physical = False):
         _backups = self.get_backups()
         backup_ids = [b for b in _backups.keys()]
         backup_ids.sort()
-        index = len(backup_ids)-keep
-        for backup_id in backup_ids[:index]:
+
+        if keep:
+            index = len(backup_ids)-keep
+            tbr = backup_ids[:index]
+
+        if keep_days:
+            cutoff = (datetime.now()- timedelta(days=keep_days)).strftime("%Y%m%d%H%M%S")
+            print cutoff
+            tbr = [bid for bid in backup_ids if bid < cutoff]
+
+        for backup_id in tbr:
             print 'Removing backup {0}'.format(backup_id)
             self.remove_backup(backup_id, keep_physical)
 
@@ -793,15 +802,16 @@ class Deployment(object):
 
 
     def backup(self, include=[], exclude=[]):
-        self.evaluate_active(include, exclude) # unnecessary?
-        backup_id = datetime.now().strftime("%Y%m%d%H%M%S");
+        self.evaluate_active(include, exclude)
+        backup_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
         def worker(m):
             if not should_do(m, include, exclude): return
-            ssh_name = m.get_ssh_name()
-            res = subprocess.call(["ssh", "root@" + ssh_name] + m.get_ssh_flags() + ["sync"])
-            if res != 0:
-                m.logger.log("running sync failed on {0}.".format(m.name))
+            if m.state != m.STOPPED:
+                ssh_name = m.get_ssh_name()
+                res = subprocess.call(["ssh", "root@" + ssh_name] + m.get_ssh_flags() + ["sync"])
+                if res != 0:
+                    m.logger.log("running sync failed on {0}.".format(m.name))
             m.backup(self.definitions[m.name], backup_id)
 
         nixops.parallel.run_tasks(nr_workers=5, tasks=self.active.itervalues(), worker_fun=worker)
@@ -854,13 +864,16 @@ class Deployment(object):
             self._destroy_resources(include=to_destroy)
 
 
-    def _deploy(self, dry_run=False, build_only=False, create_only=False, copy_only=False,
+    def _deploy(self, dry_run=False, build_only=False, create_only=False, copy_only=False, evaluate_only=False,
                 include=[], exclude=[], check=False, kill_obsolete=False,
                 allow_reboot=False, allow_recreate=False, force_reboot=False,
                 max_concurrent_copy=5, sync=True, always_activate=False, repair=False, dry_activate=False):
         """Perform the deployment defined by the deployment specification."""
 
         self.evaluate_active(include, exclude, kill_obsolete)
+
+        if evaluate_only:
+            return
 
         # Assign each resource an index if it doesn't have one.
         for r in self.active_resources.itervalues():
