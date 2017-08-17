@@ -1,14 +1,8 @@
 # -*- coding: utf-8 -*-
 
-import os
-import sys
-import socket
-import struct
-
 from nixops import known_hosts
-from nixops.util import wait_for_tcp_port, ping_tcp_port
 from nixops.util import attr_property, create_key_pair, generate_random_string
-from nixops.nix_expr import Function, RawValue, Call
+from nixops.nix_expr import RawValue, Call
 
 from nixops.backends import MachineDefinition, MachineState
 
@@ -19,8 +13,7 @@ import nixops.resources.gce_image
 import nixops.resources.gce_network
 
 import libcloud.common.google
-from libcloud.compute.types import Provider, NodeState
-from libcloud.compute.providers import get_driver
+from libcloud.compute.types import NodeState
 
 
 class GCEDefinition(MachineDefinition, ResourceDefinition):
@@ -49,6 +42,7 @@ class GCEDefinition(MachineDefinition, ResourceDefinition):
 
         scheduling = x.find("attr[@name='scheduling']")
         self.copy_option(scheduling, 'automaticRestart', bool)
+        self.copy_option(scheduling, 'preemptible', bool)
         self.copy_option(scheduling, 'onHostMaintenance', str)
 
         instance_service_account = x.find("attr[@name='instanceServiceAccount']")
@@ -121,6 +115,7 @@ class GCEState(MachineState, ResourceState):
     email = attr_property("gce.serviceAccountEmail", 'default')
     scopes = attr_property("gce.serviceAccountScopes", [], 'json')
     automatic_restart = attr_property("gce.scheduling.automaticRestart", None, bool)
+    preemptible = attr_property("gce.scheduling.preemptible", None, bool)
     on_host_maintenance = attr_property("gce.scheduling.onHostMaintenance", None)
     ipAddress = attr_property("gce.ipAddress", None)
     network = attr_property("gce.network", None)
@@ -246,6 +241,7 @@ class GCEState(MachineState, ResourceState):
                         self.state = self.STOPPED
 
                     self.handle_changed_property('region', node.extra['zone'].name, can_fix = False)
+                    self.handle_changed_property('preemptible', node.extra['scheduling']['preemptible'], can_fix = False)
 
                     # a bit hacky but should work
                     network_name = node.extra['networkInterfaces'][0]['network'].split('/')[-1]
@@ -354,6 +350,11 @@ class GCEState(MachineState, ResourceState):
                                                   snapshot = v['snapshot'], image = v['image'],
                                                   ex_disk_type = "pd-" + v.get('type', 'standard'),
                                                   use_existing= False)
+                except AttributeError:
+                    # libcloud bug: The region we're trying to create the disk
+                    # in doesn't exist.
+                    raise Exception("tried creating a disk in nonexistent "
+                                    "region %r" % v['region'])
                 except libcloud.common.google.ResourceExistsError:
                     raise Exception("tried creating a disk that already exists; "
                                     "please run 'deploy --check' to fix this")
@@ -410,6 +411,7 @@ class GCEState(MachineState, ResourceState):
                 if defn.email == 'default' and defn.scopes == []: service_accounts=None
 
                 node = self.connect().create_node(self.machine_name, defn.instance_type, "",
+                                 ex_preemptible = (defn.preemptible if defn.preemptible else None),
                                  location = self.connect().ex_get_zone(defn.region),
                                  ex_boot_disk = self.connect().ex_get_volume(boot_disk['disk_name'] or boot_disk['disk'], boot_disk.get('region', None)),
                                  ex_metadata = self.full_metadata(defn.metadata), ex_tags = defn.tags, ex_service_accounts = service_accounts,
@@ -599,7 +601,7 @@ class GCEState(MachineState, ResourceState):
 
     def destroy(self, wipe=False):
         if wipe:
-            log.warn("wipe is not supported")
+            self.depl.logger.warn("wipe is not supported")
         try:
             node = self.node()
             question = "are you sure you want to destroy {0}?"
@@ -678,8 +680,10 @@ class GCEState(MachineState, ResourceState):
                     if all(d.get("deviceName", None) != disk_name for d in node.extra['disks']):
                         res.disks_ok = False
                         res.messages.append("disk {0} is detached".format(disk_name))
+                        # Try to get a disk; if we can't get it, then it's
+                        # been destroyed.
                         try:
-                            disk = self.connect().ex_get_volume(disk_name, v.get('region', None))
+                            self.connect().ex_get_volume(disk_name, v.get('region', None))
                         except libcloud.common.google.ResourceNotFoundError:
                             res.messages.append("disk {0} is destroyed".format(disk_name))
                 self.handle_changed_property('public_ipv4',
@@ -830,7 +834,8 @@ class GCEState(MachineState, ResourceState):
         # the final nix-build).
         for k, v in self.block_device_mapping.items():
             if v.get('encrypt', False) and v.get('passphrase', "") == "" and v.get('generatedKey', "") != "":
-                keys["luks-" + (v['disk_name'] or v['disk'])] = { 'text': v['generatedKey'], 'group': 'root', 'permissions': '0600', 'user': 'root'}
+                key_name = "luks-" + (v['disk_name'] or v['disk'])
+                keys[key_name] = { 'text': v['generatedKey'], 'keyFile': '/run/keys' + key_name, 'destDir': '/run/keys', 'group': 'root', 'permissions': '0600', 'user': 'root'}
         return keys
 
     def get_ssh_name(self):

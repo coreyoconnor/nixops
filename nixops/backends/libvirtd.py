@@ -4,11 +4,13 @@ from distutils import spawn
 import os
 import copy
 import random
+import shutil
 import string
 import subprocess
 import time
 
 from nixops.backends import MachineDefinition, MachineState
+import nixops.known_hosts
 import nixops.util
 
 
@@ -80,6 +82,11 @@ class LibvirtdState(MachineState):
     def get_physical_spec(self):
         return {('users', 'extraUsers', 'root', 'openssh', 'authorizedKeys', 'keys'): [self.client_public_key]}
 
+    def address_to(self, m):
+        if isinstance(m, LibvirtdState):
+            return m.private_ipv4
+        return MachineState.address_to(self, m)
+
     def _vm_id(self):
         return "nixops-{0}-{1}".format(self.depl.uuid, self.name)
 
@@ -114,17 +121,21 @@ class LibvirtdState(MachineState):
                 raise Exception('{} is not writable by this user or it does not exist'.format(defn.image_dir))
 
             self.disk_path = self._disk_path(defn)
-            self._logged_exec(["qemu-img", "create", "-f", "qcow2", "-b",
-                               base_image + "/disk.qcow2", self.disk_path])
-            # TODO: use libvirtd.extraConfig to make the image accessible for your user
-            os.chmod(self.disk_path, 0666)
+            shutil.copyfile(base_image + "/disk.qcow2", self.disk_path)
+            # Rebase onto empty backing file to prevent breaking the disk image
+            # when the backing file gets garbage collected.
+            self._logged_exec(["qemu-img", "rebase", "-f", "qcow2", "-b",
+                               "", self.disk_path])
+            os.chmod(self.disk_path, 0660)
 
-            self.extra_disks = self._copy_extra_disks(defn)
-
+            self.domain_xml = self._make_domain_xml(defn)
             self.vm_id = self._vm_id()
-
-        self.domain_xml = self._make_domain_xml(defn)
-
+            dom_file = self.depl.tempdir + "/{0}-domain.xml".format(self.name)
+            nixops.util.write_file(dom_file, self.domain_xml)
+            # By using "virsh define" we ensure that the domain is
+            # "persistent", as opposed to "transient" (removed on reboot).
+            self._logged_exec(["virsh", "-c", "qemu:///system", "define", dom_file])
+            self.extra_disks = self._copy_extra_disks(defn)
         self.start()
         return True
 
@@ -257,9 +268,7 @@ class LibvirtdState(MachineState):
             self.private_ipv4 = self._parse_ip()
         else:
             self.log("starting...")
-            dom_file = self.depl.tempdir + "/{0}-domain.xml".format(self.name)
-            nixops.util.write_file(dom_file, self.domain_xml)
-            self._logged_exec(["virsh", "-c", "qemu:///system", "create", dom_file])
+            self._logged_exec(["virsh", "-c", "qemu:///system", "start", self.vm_id])
             self._wait_for_ip(0)
 
     def get_ssh_name(self):
@@ -273,12 +282,14 @@ class LibvirtdState(MachineState):
             self._logged_exec(["virsh", "-c", "qemu:///system", "destroy", self.vm_id])
         else:
             self.log("not running")
+        self.state = self.STOPPED
 
     def destroy(self, wipe=False):
         if not self.vm_id:
             return True
         self.log_start("destroying... ")
         self.stop()
+        self._logged_exec(["virsh", "-c", "qemu:///system", "undefine", self.vm_id])
         if (self.disk_path and os.path.exists(self.disk_path)):
             os.unlink(self.disk_path)
         for disk_name, disk_state in self.extra_disks.items():

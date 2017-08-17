@@ -87,7 +87,10 @@ class EC2SecurityGroupState(nixops.resources.ResourceState):
 
     def create_after(self, resources, defn):
         #!!! TODO: Handle dependencies between security groups
-        return {}
+        return {
+          r for r in resources if
+            isinstance(r, nixops.resources.elastic_ip.ElasticIPState)
+        }
 
     def _connect(self):
         if self._conn: return
@@ -113,7 +116,10 @@ class EC2SecurityGroupState(nixops.resources.ResourceState):
                 self._connect()
 
                 try:
-                    grp = self._conn.get_all_security_groups([ defn.security_group_name ])[0]
+                    if self.vpc_id:
+                        grp = self._conn.get_all_security_groups(group_ids=[ self.security_group_id ])[0]
+                    else:
+                        grp = self._conn.get_all_security_groups([ defn.security_group_name ])[0]
                     self.state = self.UP
                     self.security_group_id = grp.id
                     self.security_group_description = grp.description
@@ -124,21 +130,30 @@ class EC2SecurityGroupState(nixops.resources.ResourceState):
                             if grant.cidr_ip:
                                 new_rule.append(grant.cidr_ip)
                             else:
-                                new_rule.append(grant.groupName)
+                                group  = nixops.ec2_utils.id_to_security_group_name(self._conn, grant.groupId, self.vpc_id) if self.vpc_id else grant.groupName
+                                new_rule.append(group)
                                 new_rule.append(grant.owner_id)
                             rules.append(new_rule)
                     self.security_group_rules = rules
                 except boto.exception.EC2ResponseError as e:
                     if e.error_code == u'InvalidGroup.NotFound':
-                        self.state = self.Missing
+                        self.state = self.MISSING
                     else:
                         raise
+
+        # Dereference elastic IP if used for the source ip
+        resolved_security_group_rules = []
+        for rule in defn.security_group_rules:
+            if rule[-1].startswith("res-"):
+                res = self.depl.get_typed_resource(rule[-1][4:], "elastic-ip")
+                rule[-1] = res.public_ipv4 + '/32'
+            resolved_security_group_rules.append(rule)
 
         new_rules = set()
         old_rules = set()
         for rule in self.security_group_rules:
             old_rules.add(tuple(rule))
-        for rule in defn.security_group_rules:
+        for rule in resolved_security_group_rules:
             tupled_rule = tuple(rule)
             if not tupled_rule in old_rules:
                 new_rules.add(tupled_rule)
@@ -191,7 +206,7 @@ class EC2SecurityGroupState(nixops.resources.ResourceState):
                         args['name']=rule[3]
                     src_group = boto.ec2.securitygroup.SecurityGroup(**args)
                     grp.revoke(ip_protocol=rule[0], from_port=rule[1], to_port=rule[2], src_group=src_group)
-        self.security_group_rules = defn.security_group_rules
+        self.security_group_rules = resolved_security_group_rules
 
         self.state = self.UP
 
