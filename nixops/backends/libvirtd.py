@@ -104,6 +104,8 @@ class LibvirtdState(MachineState):
         if not self.primary_mac:
             self._generate_primary_mac()
 
+        self.domain_xml = self._make_domain_xml(defn)
+
         if not self.client_public_key:
             (self.client_private_key, self.client_public_key) = nixops.util.create_key_pair()
 
@@ -128,7 +130,6 @@ class LibvirtdState(MachineState):
                                "", self.disk_path])
             os.chmod(self.disk_path, 0660)
 
-            self.domain_xml = self._make_domain_xml(defn)
             self.vm_id = self._vm_id()
             dom_file = self.depl.tempdir + "/{0}-domain.xml".format(self.name)
             nixops.util.write_file(dom_file, self.domain_xml)
