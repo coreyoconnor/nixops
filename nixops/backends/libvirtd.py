@@ -80,6 +80,8 @@ class LibvirtdState(MachineState):
                               "-i", self.get_ssh_private_key_file()]
 
     def get_physical_spec(self):
+        if not self.client_public_key:
+            (self.client_private_key, self.client_public_key) = nixops.util.create_key_pair()
         return {('users', 'extraUsers', 'root', 'openssh', 'authorizedKeys', 'keys'): [self.client_public_key]}
 
     def address_to(self, m):
