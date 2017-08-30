@@ -25,6 +25,7 @@ in pkgs.vmTools.runInLinuxVM (
         ''
           mkdir $out
           diskImage=$out/image
+          diskImageFormat=qcow2
           ${pkgs.vmTools.qemu}/bin/qemu-img create -f qcow2 $diskImage "${toString size}M"
         '';
       postVM =
