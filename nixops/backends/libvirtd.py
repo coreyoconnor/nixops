@@ -7,6 +7,7 @@ import random
 import shutil
 import string
 import subprocess
+import sys
 import time
 
 from nixops.backends import MachineDefinition, MachineState
@@ -106,8 +107,6 @@ class LibvirtdState(MachineState):
         if not self.primary_mac:
             self._generate_primary_mac()
 
-        self.domain_xml = self._make_domain_xml(defn)
-
         if not self.client_public_key:
             (self.client_private_key, self.client_public_key) = nixops.util.create_key_pair()
 
@@ -132,13 +131,15 @@ class LibvirtdState(MachineState):
                                "", self.disk_path])
             os.chmod(self.disk_path, 0660)
 
+            self.extra_disks = self._copy_extra_disks(defn)
+
             self.vm_id = self._vm_id()
             dom_file = self.depl.tempdir + "/{0}-domain.xml".format(self.name)
+            self.domain_xml = self._make_domain_xml(defn)
             nixops.util.write_file(dom_file, self.domain_xml)
             # By using "virsh define" we ensure that the domain is
             # "persistent", as opposed to "transient" (removed on reboot).
             self._logged_exec(["virsh", "-c", "qemu:///system", "define", dom_file])
-            self.extra_disks = self._copy_extra_disks(defn)
         self.start()
         return True
 
@@ -183,6 +184,7 @@ class LibvirtdState(MachineState):
                 '    <interface type="network">',
                 maybe_mac(n),
                 '      <source network="{0}"/>',
+                '      <model type="virtio"/>',
                 '    </interface>',
             ]).format(n)
 
@@ -200,6 +202,9 @@ class LibvirtdState(MachineState):
             '  <name>{0}</name>',
             '  <memory unit="MiB">{1}</memory>',
             '  <vcpu>{4}</vcpu>',
+            '  <cpu>',
+            '    <topology sockets="1" cores="{4}" threads="1"/>',
+            '  </cpu>',
             '  <os>',
             '    <type arch="x86_64">hvm</type>',
             '  </os>',
