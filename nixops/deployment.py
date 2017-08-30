@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import sys
+import os
 import os.path
 import subprocess
 import json
@@ -87,7 +88,12 @@ class Deployment(object):
     @property
     def tempdir(self):
         if not self._tempdir:
-            self._tempdir = nixops.util.SelfDeletingDir(tempfile.mkdtemp(prefix="nixops-tmp"))
+            if os.environ.get("PROJECT_DIR") is None:
+                self._tempdir = nixops.util.SelfDeletingDir(tempfile.mkdtemp(prefix="nixops-tmp"))
+            else:
+                self._tempdir = os.environ.get("PROJECT_DIR") + "/build"
+                if not os.path.isdir(self._tempdir):
+                    os.makedirs(self._tempdir)
         return self._tempdir
 
     @property
